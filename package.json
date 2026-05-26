@@ -9,6 +9,7 @@
     "shopify": "shopify"
   },
   "dependencies": {
+    "@preact/signals": "latest",
     "@shopify/ui-extensions": "latest",
     "preact": "latest"
   },
