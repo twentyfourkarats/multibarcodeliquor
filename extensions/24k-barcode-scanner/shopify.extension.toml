@@ -1,0 +1,15 @@
+api_version = "2025-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "24K Barcode Scanner"
+handle = "24k-barcode-scanner"
+description = "Scan native and alternate product barcodes in Shopify POS."
+
+[[extensions.targeting]]
+target = "pos.home.tile.render"
+module = "./src/Tile.jsx"
+
+[[extensions.targeting]]
+target = "pos.home.modal.render"
+module = "./src/Modal.jsx"
