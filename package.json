@@ -1,0 +1,18 @@
+{
+  "name": "multibarcodeliquor-pos-scanner",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "shopify app dev",
+    "build": "shopify app build",
+    "deploy": "shopify app deploy",
+    "shopify": "shopify"
+  },
+  "dependencies": {
+    "@shopify/ui-extensions": "latest",
+    "preact": "latest"
+  },
+  "devDependencies": {
+    "@shopify/cli": "latest"
+  }
+}
