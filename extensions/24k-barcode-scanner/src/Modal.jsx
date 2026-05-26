@@ -1,4 +1,3 @@
-/** @jsx h */
 import {h, render} from 'preact';
 import {useEffect, useRef, useState} from 'preact/hooks';
 import '@shopify/ui-extensions/preact';
@@ -97,9 +96,9 @@ async function buildBarcodeIndex() {
   return {index, conflicts, variantCount, barcodeCount: Object.keys(index).length};
 }
 
-export default async () => {
-  render(<Extension />, document.body);
-};
+function el(tag, props, ...children) {
+  return h(tag, props || {}, ...children.filter((child) => child !== null && child !== undefined && child !== false));
+}
 
 function Extension() {
   const [loading, setLoading] = useState(true);
@@ -202,27 +201,50 @@ function Extension() {
   }
 
   if (loading) {
-    return <s-page heading="24K Barcode Scanner"><s-section><s-stack direction="block" gap="base"><s-spinner /><s-text>{status}</s-text></s-stack></s-section></s-page>;
+    return el('s-page', {heading: '24K Barcode Scanner'},
+      el('s-section', null,
+        el('s-stack', {direction: 'block', gap: 'base'},
+          el('s-spinner'),
+          el('s-text', null, status),
+        ),
+      ),
+    );
   }
 
   if (error) {
-    return <s-page heading="24K Barcode Scanner"><s-section><s-stack direction="block" gap="base"><s-banner tone="critical" heading="Scanner error">{error}</s-banner><s-button variant="primary" onClick={initialize}>Reload barcode data</s-button><s-button variant="secondary" onClick={() => shopify.scanner.hideCameraScanner()}>Stop scanner</s-button></s-stack></s-section></s-page>;
+    return el('s-page', {heading: '24K Barcode Scanner'},
+      el('s-section', null,
+        el('s-stack', {direction: 'block', gap: 'base'},
+          el('s-banner', {tone: 'critical', heading: 'Scanner error'}, error),
+          el('s-button', {variant: 'primary', onClick: initialize}, 'Reload barcode data'),
+          el('s-button', {variant: 'secondary', onClick: () => shopify.scanner.hideCameraScanner()}, 'Stop scanner'),
+        ),
+      ),
+    );
   }
 
-  return (
-    <s-page heading="24K Barcode Scanner">
-      <s-section>
-        <s-stack direction="block" gap="base">
-          <s-banner tone="info" heading="Scan products here">Use this scanner when Shopify POS does not recognize a product barcode.</s-banner>
-          <s-text>{status}</s-text>
-          {lastFound && <s-banner tone="success" heading="Added to cart">{lastFound.title}</s-banner>}
-          {lastNotFound && <s-banner tone="critical" heading="Barcode not found">{lastNotFound}</s-banner>}
-          <s-text-field label="Manual barcode" value={manualBarcode} placeholder="Enter UPC manually" autocomplete="off" onInput={(event) => setManualBarcode(event.target.value)} />
-          <s-button variant="primary" disabled={!normalizeBarcode(manualBarcode)} onClick={handleManualSubmit}>Add by manual barcode</s-button>
-          <s-button variant="secondary" onClick={() => shopify.scanner.showCameraScanner()}>Open camera scanner</s-button>
-          <s-button variant="secondary" onClick={initialize}>Reload barcode data</s-button>
-        </s-stack>
-      </s-section>
-    </s-page>
+  return el('s-page', {heading: '24K Barcode Scanner'},
+    el('s-section', null,
+      el('s-stack', {direction: 'block', gap: 'base'},
+        el('s-banner', {tone: 'info', heading: 'Scan products here'}, 'Use this scanner when Shopify POS does not recognize a product barcode.'),
+        el('s-text', null, status),
+        lastFound && el('s-banner', {tone: 'success', heading: 'Added to cart'}, lastFound.title),
+        lastNotFound && el('s-banner', {tone: 'critical', heading: 'Barcode not found'}, lastNotFound),
+        el('s-text-field', {
+          label: 'Manual barcode',
+          value: manualBarcode,
+          placeholder: 'Enter UPC manually',
+          autocomplete: 'off',
+          onInput: (event) => setManualBarcode(event.target.value),
+        }),
+        el('s-button', {variant: 'primary', disabled: !normalizeBarcode(manualBarcode), onClick: handleManualSubmit}, 'Add by manual barcode'),
+        el('s-button', {variant: 'secondary', onClick: () => shopify.scanner.showCameraScanner()}, 'Open camera scanner'),
+        el('s-button', {variant: 'secondary', onClick: initialize}, 'Reload barcode data'),
+      ),
+    ),
   );
 }
+
+export default async () => {
+  render(h(Extension, null), document.body);
+};
