@@ -1,4 +1,5 @@
-import {render} from 'preact';
+/** @jsx h */
+import {h, render} from 'preact';
 import {useEffect, useRef, useState} from 'preact/hooks';
 import '@shopify/ui-extensions/preact';
 
