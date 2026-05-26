@@ -1,16 +1,15 @@
-# 24K Multi-Barcode POS Scanner
-# This file is linked to a Shopify app by running: npm run dev
-# Shopify CLI will update/create the app configuration during login/linking.
-
-name = "24K Multi-Barcode POS Scanner"
+name = "Multi-Barcode Manager"
 client_id = ""
 application_url = "https://example.com"
 embedded = true
-handle = "24k-multi-barcode-pos-scanner"
+handle = "multi-barcode-manager"
 
 [build]
 automatically_update_urls_on_dev = true
 include_config_on_deploy = true
+
+[webhooks]
+api_version = "2025-10"
 
 [access_scopes]
 scopes = "read_products,write_products"
@@ -21,9 +20,3 @@ redirect_urls = [
   "https://example.com/auth/shopify/callback",
   "https://example.com/api/auth/callback"
 ]
-
-[webhooks]
-api_version = "2025-10"
-
-[pos]
-embedded = false
