@@ -1,4 +1,5 @@
-import {render} from 'preact';
+/** @jsx h */
+import {h, render} from 'preact';
 import '@shopify/ui-extensions/preact';
 
 export default async () => {
