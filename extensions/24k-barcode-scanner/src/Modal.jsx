@@ -21,11 +21,11 @@ const FETCH_VARIANTS_QUERY = `#graphql
 `;
 
 const MIN_AUTO_SUBMIT_LENGTH = 8;
-const AUTO_SUBMIT_DELAY_MS = 120;
+const AUTO_SUBMIT_DELAY_MS = 500;
 const DUPLICATE_SCAN_WINDOW_MS = 1200;
 
 function normalizeBarcode(value) {
-  return String(value || '').trim();
+  return String(value || '').replace(/[\r\n\t]/g, '').trim();
 }
 
 function parseAlternateBarcodes(jsonValue) {
@@ -137,6 +137,7 @@ function Extension() {
   const [lastNotFound, setLastNotFound] = useState('');
   const [warning, setWarning] = useState('');
   const inputRef = useRef(null);
+  const currentInputRef = useRef('');
   const autoSubmitTimerRef = useRef(null);
   const processingRef = useRef(false);
   const lastScanRef = useRef({barcode: '', timestamp: 0});
@@ -170,18 +171,29 @@ function Extension() {
     }, 60);
   }
 
-  function scheduleAutoSubmit(value) {
-    const barcode = normalizeBarcode(value);
+  function resetInput() {
+    currentInputRef.current = '';
+    setManualBarcode('');
+  }
+
+  function scheduleAutoSubmit(rawValue) {
+    const rawString = String(rawValue || '');
+    const barcode = normalizeBarcode(rawString);
+    currentInputRef.current = barcode;
+
     if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
     if (barcode.length < MIN_AUTO_SUBMIT_LENGTH) return;
 
+    const hasScannerTerminator = /[\r\n]/.test(rawString);
+    const delay = hasScannerTerminator ? 0 : AUTO_SUBMIT_DELAY_MS;
+
     autoSubmitTimerRef.current = setTimeout(async () => {
-      const latest = normalizeBarcode(manualBarcode || barcode);
+      const latest = normalizeBarcode(currentInputRef.current);
       if (latest.length < MIN_AUTO_SUBMIT_LENGTH) return;
-      setManualBarcode('');
+      resetInput();
       await processBarcode(latest);
       focusScannerInput();
-    }, AUTO_SUBMIT_DELAY_MS);
+    }, delay);
   }
 
   async function initialize() {
@@ -262,8 +274,8 @@ function Extension() {
   }
 
   async function handleManualSubmit() {
-    const barcode = normalizeBarcode(manualBarcode);
-    setManualBarcode('');
+    const barcode = normalizeBarcode(currentInputRef.current || manualBarcode);
+    resetInput();
     await processBarcode(barcode);
     focusScannerInput();
   }
@@ -309,6 +321,7 @@ function Extension() {
           inputMode: 'numeric',
           onInput: (event) => {
             const value = event.target.value;
+            currentInputRef.current = normalizeBarcode(value);
             setManualBarcode(value);
             scheduleAutoSubmit(value);
           },
