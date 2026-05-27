@@ -1,8 +1,8 @@
-name = "Multi-Barcode Manager"
+name = "24K POS Barcode Scanner"
 client_id = ""
 application_url = "https://example.com"
-embedded = true
-handle = "multi-barcode-manager"
+embedded = false
+handle = "24k-pos-barcode-scanner"
 
 [build]
 automatically_update_urls_on_dev = true
