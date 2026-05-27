@@ -78,17 +78,20 @@ function addBarcodeToIndex(index, conflicts, barcode, variant, matchType) {
 
   if (existing && existing.variantGid !== variant.id) {
     conflicts.push({barcode: normalized, firstTitle: existing.title, secondTitle: title});
+    delete index[normalized];
     return;
   }
 
-  index[normalized] = {
-    barcode: normalized,
-    variantGid: variant.id,
-    variantNumericId: variantNumericIdFromGid(variant.id),
-    title,
-    sku: variant.sku || null,
-    matchType,
-  };
+  if (!existing) {
+    index[normalized] = {
+      barcode: normalized,
+      variantGid: variant.id,
+      variantNumericId: variantNumericIdFromGid(variant.id),
+      title,
+      sku: variant.sku || null,
+      matchType,
+    };
+  }
 }
 
 async function buildBarcodeIndex() {
@@ -128,6 +131,7 @@ function Extension() {
   const [error, setError] = useState('');
   const [lastFound, setLastFound] = useState(null);
   const [lastNotFound, setLastNotFound] = useState('');
+  const [warning, setWarning] = useState('');
   const processingRef = useRef(false);
   const lastScanRef = useRef({barcode: '', timestamp: 0});
 
@@ -151,25 +155,24 @@ function Extension() {
   async function initialize() {
     setLoading(true);
     setError('');
+    setWarning('');
     setLastFound(null);
     setLastNotFound('');
     setStatus('Loading barcode data from Shopify...');
 
     try {
       const built = await buildBarcodeIndex();
-      if (built.conflicts.length > 0) {
-        const conflict = built.conflicts[0];
-        setError(`Duplicate barcode conflict: ${conflict.barcode} is assigned to both ${conflict.firstTitle} and ${conflict.secondTitle}. Fix this in Multi-Barcode Manager.`);
-        setLoading(false);
-        return;
-      }
       if (built.barcodeCount === 0) {
         setError('No barcodes found. Check that products have native barcodes or alternate barcodes saved in custom.alternate_barcodes.');
         setLoading(false);
         return;
       }
       setBarcodeIndex(built.index);
-      setStatus(`Ready. Loaded ${built.barcodeCount} barcodes from ${built.variantCount} variants.`);
+      if (built.conflicts.length > 0) {
+        const conflict = built.conflicts[0];
+        setWarning(`${built.conflicts.length} duplicate barcode conflict(s) ignored. Example: ${conflict.barcode} belongs to both ${conflict.firstTitle} and ${conflict.secondTitle}. Fix duplicates in Multi-Barcode Manager.`);
+      }
+      setStatus(`Ready. Loaded ${built.barcodeCount} usable barcodes from ${built.variantCount} variants.`);
       setLoading(false);
       shopify.scanner.showCameraScanner();
     } catch (err) {
@@ -249,6 +252,7 @@ function Extension() {
     el('s-section', null,
       el('s-stack', {direction: 'block', gap: 'base'},
         el('s-banner', {tone: 'info', heading: 'Scan products here'}, 'Use this scanner when Shopify POS does not recognize a product barcode.'),
+        warning && el('s-banner', {tone: 'warning', heading: 'Duplicate barcodes ignored'}, warning),
         el('s-text', null, status),
         lastFound && el('s-banner', {tone: 'success', heading: 'Added to cart'}, lastFound.title),
         lastNotFound && el('s-banner', {tone: 'critical', heading: 'Barcode not found'}, lastNotFound),
