@@ -20,6 +20,10 @@ const FETCH_VARIANTS_QUERY = `#graphql
   }
 `;
 
+const MIN_AUTO_SUBMIT_LENGTH = 8;
+const AUTO_SUBMIT_DELAY_MS = 120;
+const DUPLICATE_SCAN_WINDOW_MS = 1200;
+
 function normalizeBarcode(value) {
   return String(value || '').trim();
 }
@@ -132,6 +136,8 @@ function Extension() {
   const [lastFound, setLastFound] = useState(null);
   const [lastNotFound, setLastNotFound] = useState('');
   const [warning, setWarning] = useState('');
+  const inputRef = useRef(null);
+  const autoSubmitTimerRef = useRef(null);
   const processingRef = useRef(false);
   const lastScanRef = useRef({barcode: '', timestamp: 0});
 
@@ -140,17 +146,43 @@ function Extension() {
     const unsubscribe = shopify.scanner.scannerData.current.subscribe(async (scan) => {
       const barcode = normalizeBarcode(scan.data);
       if (!barcode) return;
-      const now = Date.now();
-      const lastScan = lastScanRef.current;
-      if (lastScan.barcode === barcode && now - lastScan.timestamp < 1200) return;
-      lastScanRef.current = {barcode, timestamp: now};
-      await handleBarcode(barcode);
+      await processBarcode(barcode);
     });
     return () => {
+      if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
       unsubscribe();
       shopify.scanner.hideCameraScanner();
     };
   }, []);
+
+  useEffect(() => {
+    if (!loading && !error) focusScannerInput();
+  }, [loading, error, barcodeIndex]);
+
+  function focusScannerInput() {
+    setTimeout(() => {
+      try {
+        inputRef.current?.focus?.();
+        inputRef.current?.select?.();
+      } catch (_err) {
+        // POS UI extension hosts do not always expose focus/select. Safe to ignore.
+      }
+    }, 60);
+  }
+
+  function scheduleAutoSubmit(value) {
+    const barcode = normalizeBarcode(value);
+    if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
+    if (barcode.length < MIN_AUTO_SUBMIT_LENGTH) return;
+
+    autoSubmitTimerRef.current = setTimeout(async () => {
+      const latest = normalizeBarcode(manualBarcode || barcode);
+      if (latest.length < MIN_AUTO_SUBMIT_LENGTH) return;
+      setManualBarcode('');
+      await processBarcode(latest);
+      focusScannerInput();
+    }, AUTO_SUBMIT_DELAY_MS);
+  }
 
   async function initialize() {
     setLoading(true);
@@ -172,19 +204,29 @@ function Extension() {
         const conflict = built.conflicts[0];
         setWarning(`${built.conflicts.length} duplicate barcode conflict(s) ignored. Example: ${conflict.barcode} belongs to both ${conflict.firstTitle} and ${conflict.secondTitle}. Fix duplicates in Multi-Barcode Manager.`);
       }
-      setStatus(`Ready. Loaded ${built.barcodeCount} usable barcodes from ${built.variantCount} variants.`);
+      setStatus(`Ready to scan. Loaded ${built.barcodeCount} usable barcodes.`);
       setLoading(false);
       shopify.scanner.showCameraScanner();
+      focusScannerInput();
     } catch (err) {
       setError(err instanceof Error ? err.message : `Unknown error: ${String(err)}`);
       setLoading(false);
     }
   }
 
-  async function handleBarcode(rawBarcode) {
+  async function processBarcode(rawBarcode) {
     const barcode = normalizeBarcode(rawBarcode);
     if (!barcode || !barcodeIndex || processingRef.current) return;
 
+    const now = Date.now();
+    const lastScan = lastScanRef.current;
+    if (lastScan.barcode === barcode && now - lastScan.timestamp < DUPLICATE_SCAN_WINDOW_MS) return;
+    lastScanRef.current = {barcode, timestamp: now};
+
+    await handleBarcode(barcode);
+  }
+
+  async function handleBarcode(barcode) {
     setLastFound(null);
     setLastNotFound('');
     setError('');
@@ -194,6 +236,7 @@ function Extension() {
       setLastNotFound(barcode);
       setStatus(`Not found: ${barcode}`);
       shopify.toast.show(`Barcode not found: ${barcode}`);
+      focusScannerInput();
       return;
     }
 
@@ -207,9 +250,10 @@ function Extension() {
         return;
       }
       setLastFound(match);
-      setStatus(`Added: ${match.title}`);
+      setStatus('Ready for next scan.');
       shopify.toast.show(`Added: ${match.title}`);
       shopify.scanner.showCameraScanner();
+      focusScannerInput();
     } catch (err) {
       setError(err instanceof Error ? err.message : `Failed to add product to cart: ${String(err)}`);
     } finally {
@@ -220,7 +264,8 @@ function Extension() {
   async function handleManualSubmit() {
     const barcode = normalizeBarcode(manualBarcode);
     setManualBarcode('');
-    await handleBarcode(barcode);
+    await processBarcode(barcode);
+    focusScannerInput();
   }
 
   if (loading) {
@@ -251,20 +296,30 @@ function Extension() {
   return el('s-page', {heading: '24K Barcode Scanner'},
     el('s-section', null,
       el('s-stack', {direction: 'block', gap: 'base'},
-        el('s-banner', {tone: 'info', heading: 'Scan products here'}, 'Use this scanner when Shopify POS does not recognize a product barcode.'),
         warning && el('s-banner', {tone: 'warning', heading: 'Duplicate barcodes ignored'}, warning),
         el('s-text', null, status),
         lastFound && el('s-banner', {tone: 'success', heading: 'Added to cart'}, lastFound.title),
         lastNotFound && el('s-banner', {tone: 'critical', heading: 'Barcode not found'}, lastNotFound),
         el('s-text-field', {
-          label: 'Manual barcode',
+          ref: inputRef,
+          label: 'Scan or enter barcode',
           value: manualBarcode,
-          placeholder: 'Enter UPC manually',
+          placeholder: 'Ready for scanner input',
           autocomplete: 'off',
-          onInput: (event) => setManualBarcode(event.target.value),
+          inputMode: 'numeric',
+          onInput: (event) => {
+            const value = event.target.value;
+            setManualBarcode(value);
+            scheduleAutoSubmit(value);
+          },
+          onKeyDown: async (event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault?.();
+              await handleManualSubmit();
+            }
+          },
         }),
-        el('s-button', {variant: 'primary', disabled: !normalizeBarcode(manualBarcode), onClick: handleManualSubmit}, 'Add by manual barcode'),
-        el('s-button', {variant: 'secondary', onClick: () => shopify.scanner.showCameraScanner()}, 'Open camera scanner'),
+        el('s-button', {variant: 'primary', disabled: !normalizeBarcode(manualBarcode), onClick: handleManualSubmit}, 'Add barcode'),
         el('s-button', {variant: 'secondary', onClick: initialize}, 'Reload barcode data'),
       ),
     ),
