@@ -4,6 +4,7 @@ api_version = "2025-10"
 type = "ui_extension"
 name = "24K Barcode Scanner"
 handle = "24k-barcode-scanner"
+uid = "f6a4a9d0-7d9b-4f36-9b3f-0b9ed3bb1f2c"
 description = "Scan native and alternate product barcodes in Shopify POS."
 
 [[extensions.targeting]]
