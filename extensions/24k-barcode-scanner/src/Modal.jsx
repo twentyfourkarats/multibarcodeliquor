@@ -190,15 +190,6 @@ function Extension() {
     setManualBarcode('');
   }
 
-  function closeScanner() {
-    try {
-      shopify.scanner.hideCameraScanner();
-      shopify.navigation?.dismiss?.();
-    } catch (_err) {
-      shopify.scanner.hideCameraScanner();
-    }
-  }
-
   function scheduleAutoSubmit(rawValue) {
     const rawString = String(rawValue || '');
     const barcode = normalizeBarcode(rawString);
@@ -320,7 +311,6 @@ function Extension() {
           el('s-text', null, error),
           el('s-text', {color: 'subdued'}, 'This error happened while loading barcode data from Shopify.'),
           el('s-button', {variant: 'primary', onClick: initialize}, 'Reload barcode data'),
-          el('s-button', {variant: 'secondary', onClick: closeScanner}, 'Done'),
         ),
       ),
     );
@@ -354,10 +344,7 @@ function Extension() {
           },
         }),
         el('s-button', {variant: 'primary', disabled: !normalizeBarcode(manualBarcode), onClick: handleManualSubmit}, 'Add barcode'),
-        el('s-button', {variant: 'secondary', onClick: startFocusAssist}, 'Refocus scanner field'),
-        el('s-button', {variant: 'secondary', onClick: () => shopify.scanner.showCameraScanner()}, 'Open camera scanner'),
         el('s-button', {variant: 'secondary', onClick: initialize}, 'Reload barcode data'),
-        el('s-button', {variant: 'secondary', onClick: closeScanner}, 'Done'),
       ),
     ),
   );
