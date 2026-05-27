@@ -1,7 +1,7 @@
-name = "24K POS Barcode Scanner"
+name = "24K Multi-Barcode Manager"
 client_id = ""
-application_url = "https://shopify.dev/apps/default-app-home"
-embedded = false
+application_url = "https://multibarcodeapp24kliquor.lovable.app"
+embedded = true
 handle = "24k-pos-barcode-scanner"
 
 [build]
@@ -18,5 +18,5 @@ direct_api_mode = "online"
 
 [auth]
 redirect_urls = [
-  "https://shopify.dev/apps/default-app-home/auth/callback"
+  "https://multibarcodeapp24kliquor.lovable.app/auth/callback"
 ]
