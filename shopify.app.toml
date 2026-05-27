@@ -1,12 +1,11 @@
 name = "24K POS Barcode Scanner"
 client_id = ""
-application_url = "https://example.com"
+application_url = "https://shopify.dev/apps/default-app-home"
 embedded = false
 handle = "24k-pos-barcode-scanner"
 
 [build]
 automatically_update_urls_on_dev = true
-include_config_on_deploy = true
 
 [webhooks]
 api_version = "2025-10"
@@ -14,9 +13,10 @@ api_version = "2025-10"
 [access_scopes]
 scopes = "read_products,write_products"
 
+[access.admin]
+direct_api_mode = "online"
+
 [auth]
 redirect_urls = [
-  "https://example.com/auth/callback",
-  "https://example.com/auth/shopify/callback",
-  "https://example.com/api/auth/callback"
+  "https://shopify.dev/apps/default-app-home/auth/callback"
 ]
