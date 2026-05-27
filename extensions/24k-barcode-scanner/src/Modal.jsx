@@ -40,12 +40,32 @@ function variantNumericIdFromGid(gid) {
 }
 
 async function adminGraphQL(query, variables = {}) {
-  const response = await fetch('shopify:admin/api/graphql.json', {
-    method: 'POST',
-    body: JSON.stringify({query, variables}),
-  });
-  const json = await response.json();
-  if (json.errors?.length) throw new Error(json.errors.map((error) => error.message).join(', '));
+  let response;
+  try {
+    response = await fetch('shopify:admin/api/graphql.json', {
+      method: 'POST',
+      body: JSON.stringify({query, variables}),
+    });
+  } catch (err) {
+    throw new Error(`Direct Admin API request failed before response: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  const text = await response.text();
+  let json;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch (err) {
+    throw new Error(`Direct Admin API returned non-JSON response. Status ${response.status}. Body: ${text.slice(0, 250)}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(`Direct Admin API HTTP ${response.status}: ${JSON.stringify(json).slice(0, 350)}`);
+  }
+
+  if (json.errors?.length) {
+    throw new Error(`GraphQL error: ${json.errors.map((error) => error.message).join(', ')}`);
+  }
+
   return json.data;
 }
 
@@ -153,7 +173,7 @@ function Extension() {
       setLoading(false);
       shopify.scanner.showCameraScanner();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load barcode data.');
+      setError(err instanceof Error ? err.message : `Unknown error: ${String(err)}`);
       setLoading(false);
     }
   }
@@ -188,7 +208,7 @@ function Extension() {
       shopify.toast.show(`Added: ${match.title}`);
       shopify.scanner.showCameraScanner();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add product to cart.');
+      setError(err instanceof Error ? err.message : `Failed to add product to cart: ${String(err)}`);
     } finally {
       processingRef.current = false;
     }
@@ -215,7 +235,9 @@ function Extension() {
     return el('s-page', {heading: '24K Barcode Scanner'},
       el('s-section', null,
         el('s-stack', {direction: 'block', gap: 'base'},
-          el('s-banner', {tone: 'critical', heading: 'Scanner error'}, error),
+          el('s-banner', {tone: 'critical', heading: 'Scanner error'}, 'Open details below.'),
+          el('s-text', null, error),
+          el('s-text', {color: 'subdued'}, 'This error happened while loading barcode data from Shopify.'),
           el('s-button', {variant: 'primary', onClick: initialize}, 'Reload barcode data'),
           el('s-button', {variant: 'secondary', onClick: () => shopify.scanner.hideCameraScanner()}, 'Stop scanner'),
         ),
