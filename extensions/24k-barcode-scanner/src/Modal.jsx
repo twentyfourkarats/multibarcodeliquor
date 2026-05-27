@@ -139,6 +139,7 @@ function Extension() {
   const inputRef = useRef(null);
   const currentInputRef = useRef('');
   const autoSubmitTimerRef = useRef(null);
+  const focusAssistTimerRef = useRef(null);
   const processingRef = useRef(false);
   const lastScanRef = useRef({barcode: '', timestamp: 0});
 
@@ -151,29 +152,51 @@ function Extension() {
     });
     return () => {
       if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
+      if (focusAssistTimerRef.current) clearInterval(focusAssistTimerRef.current);
       unsubscribe();
       shopify.scanner.hideCameraScanner();
     };
   }, []);
 
   useEffect(() => {
-    if (!loading && !error) focusScannerInput();
+    if (!loading && !error) startFocusAssist();
   }, [loading, error, barcodeIndex]);
 
   function focusScannerInput() {
-    setTimeout(() => {
-      try {
-        inputRef.current?.focus?.();
-        inputRef.current?.select?.();
-      } catch (_err) {
-        // POS UI extension hosts do not always expose focus/select. Safe to ignore.
+    try {
+      inputRef.current?.focus?.();
+      inputRef.current?.select?.();
+    } catch (_err) {
+      // POS UI extension hosts do not always expose focus/select. Safe to ignore.
+    }
+  }
+
+  function startFocusAssist() {
+    let attempts = 0;
+    if (focusAssistTimerRef.current) clearInterval(focusAssistTimerRef.current);
+    focusScannerInput();
+    focusAssistTimerRef.current = setInterval(() => {
+      attempts += 1;
+      focusScannerInput();
+      if (attempts >= 10) {
+        clearInterval(focusAssistTimerRef.current);
+        focusAssistTimerRef.current = null;
       }
-    }, 60);
+    }, 250);
   }
 
   function resetInput() {
     currentInputRef.current = '';
     setManualBarcode('');
+  }
+
+  function closeScanner() {
+    try {
+      shopify.scanner.hideCameraScanner();
+      shopify.navigation?.dismiss?.();
+    } catch (_err) {
+      shopify.scanner.hideCameraScanner();
+    }
   }
 
   function scheduleAutoSubmit(rawValue) {
@@ -192,7 +215,7 @@ function Extension() {
       if (latest.length < MIN_AUTO_SUBMIT_LENGTH) return;
       resetInput();
       await processBarcode(latest);
-      focusScannerInput();
+      startFocusAssist();
     }, delay);
   }
 
@@ -218,8 +241,7 @@ function Extension() {
       }
       setStatus(`Ready to scan. Loaded ${built.barcodeCount} usable barcodes.`);
       setLoading(false);
-      shopify.scanner.showCameraScanner();
-      focusScannerInput();
+      startFocusAssist();
     } catch (err) {
       setError(err instanceof Error ? err.message : `Unknown error: ${String(err)}`);
       setLoading(false);
@@ -248,7 +270,7 @@ function Extension() {
       setLastNotFound(barcode);
       setStatus(`Not found: ${barcode}`);
       shopify.toast.show(`Barcode not found: ${barcode}`);
-      focusScannerInput();
+      startFocusAssist();
       return;
     }
 
@@ -264,8 +286,7 @@ function Extension() {
       setLastFound(match);
       setStatus('Ready for next scan.');
       shopify.toast.show(`Added: ${match.title}`);
-      shopify.scanner.showCameraScanner();
-      focusScannerInput();
+      startFocusAssist();
     } catch (err) {
       setError(err instanceof Error ? err.message : `Failed to add product to cart: ${String(err)}`);
     } finally {
@@ -277,7 +298,7 @@ function Extension() {
     const barcode = normalizeBarcode(currentInputRef.current || manualBarcode);
     resetInput();
     await processBarcode(barcode);
-    focusScannerInput();
+    startFocusAssist();
   }
 
   if (loading) {
@@ -299,7 +320,7 @@ function Extension() {
           el('s-text', null, error),
           el('s-text', {color: 'subdued'}, 'This error happened while loading barcode data from Shopify.'),
           el('s-button', {variant: 'primary', onClick: initialize}, 'Reload barcode data'),
-          el('s-button', {variant: 'secondary', onClick: () => shopify.scanner.hideCameraScanner()}, 'Stop scanner'),
+          el('s-button', {variant: 'secondary', onClick: closeScanner}, 'Done'),
         ),
       ),
     );
@@ -318,7 +339,7 @@ function Extension() {
           value: manualBarcode,
           placeholder: 'Ready for scanner input',
           autocomplete: 'off',
-          inputMode: 'numeric',
+          inputMode: 'text',
           onInput: (event) => {
             const value = event.target.value;
             currentInputRef.current = normalizeBarcode(value);
@@ -333,7 +354,10 @@ function Extension() {
           },
         }),
         el('s-button', {variant: 'primary', disabled: !normalizeBarcode(manualBarcode), onClick: handleManualSubmit}, 'Add barcode'),
+        el('s-button', {variant: 'secondary', onClick: startFocusAssist}, 'Refocus scanner field'),
+        el('s-button', {variant: 'secondary', onClick: () => shopify.scanner.showCameraScanner()}, 'Open camera scanner'),
         el('s-button', {variant: 'secondary', onClick: initialize}, 'Reload barcode data'),
+        el('s-button', {variant: 'secondary', onClick: closeScanner}, 'Done'),
       ),
     ),
   );
