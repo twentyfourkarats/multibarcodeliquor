@@ -21,12 +21,19 @@ const state = {
   selectedIds: new Set(),
   bulkVariants: [],
   inBulkEdit: false,
+  alternateView: false,
+  alternateLoading: false,
+  alternateError: '',
+  alternateVariants: [],
+  alternateLoaded: false,
+  alternateScanned: 0,
   debounce: null,
 };
 
 const CHECK_METAFIELD_DEFINITION_QUERY = `query CheckMetafieldDefinition { metafieldDefinition(identifier: { ownerType: PRODUCTVARIANT namespace: "custom" key: "alternate_barcodes" }) { id } }`;
 const CREATE_METAFIELD_DEFINITION_MUTATION = `mutation CreateBarcodeMetafieldDefinition($definition: MetafieldDefinitionInput!) { metafieldDefinitionCreate(definition: $definition) { createdDefinition { id name } userErrors { field message code } } }`;
 const SEARCH_VARIANTS_QUERY = `query SearchVariants($query: String!, $after: String) { productVariants(first: 25, query: $query, after: $after) { edges { node { id title barcode sku product { id title featuredMedia { ... on MediaImage { preview { image { url } } } } } alternateBarcodes: metafield(namespace: "custom", key: "alternate_barcodes") { jsonValue } } } pageInfo { hasNextPage endCursor hasPreviousPage startCursor } } }`;
+const FETCH_VARIANTS_WITH_BARCODES_QUERY = `query FetchVariantsWithBarcodes($after: String) { productVariants(first: 250, after: $after) { edges { node { id title barcode sku product { id title featuredMedia { ... on MediaImage { preview { image { url } } } } } alternateBarcodes: metafield(namespace: "custom", key: "alternate_barcodes") { jsonValue } } } pageInfo { hasNextPage endCursor } } }`;
 const SET_ALTERNATE_BARCODES_MUTATION = `mutation SetAlternateBarcodes($ownerId: ID!, $value: String!) { metafieldsSet(metafields: [{ ownerId: $ownerId namespace: "custom" key: "alternate_barcodes" type: "list.single_line_text_field" value: $value }]) { metafields { id jsonValue } userErrors { field message code } } }`;
 
 function esc(value) {
@@ -108,7 +115,7 @@ function buildSkipWarning(native, dupes) {
 }
 
 async function performSearch(term, cursor = null, pushCursor = false) {
-  state.searching = true; state.searchError = ''; state.selected = null; render();
+  state.searching = true; state.searchError = ''; state.selected = null; state.alternateView = false; render();
   try {
     const data = await adminGraphQL(SEARCH_VARIANTS_QUERY, { query: term, after: cursor });
     state.variants = (data?.productVariants?.edges || []).map(e => mapVariant(e.node));
@@ -118,6 +125,43 @@ async function performSearch(term, cursor = null, pushCursor = false) {
   } catch (err) {
     state.searchError = err.message || 'Search failed.'; state.variants = []; state.hasSearched = true;
   } finally { state.searching = false; render(); }
+}
+
+async function loadAlternateBarcodeView(force = false) {
+  state.alternateView = true;
+  state.selected = null;
+  state.inBulkEdit = false;
+  state.bulkMode = false;
+  state.selectedIds = new Set();
+  state.alternateError = '';
+  if (state.alternateLoaded && !force) { render(); return; }
+  state.alternateLoading = true;
+  state.alternateVariants = [];
+  state.alternateScanned = 0;
+  render();
+
+  try {
+    let after = null;
+    const found = [];
+    do {
+      const data = await adminGraphQL(FETCH_VARIANTS_WITH_BARCODES_QUERY, { after });
+      const connection = data?.productVariants;
+      const edges = connection?.edges || [];
+      state.alternateScanned += edges.length;
+      for (const edge of edges) {
+        const variant = mapVariant(edge.node);
+        if (variant.alternateBarcodes.length > 0) found.push(variant);
+      }
+      after = connection?.pageInfo?.hasNextPage ? connection.pageInfo.endCursor : null;
+    } while (after);
+    state.alternateVariants = found.sort((a, b) => variantDisplayTitle(a).localeCompare(variantDisplayTitle(b)));
+    state.alternateLoaded = true;
+  } catch (err) {
+    state.alternateError = err.message || 'Could not load alternate barcode list.';
+  } finally {
+    state.alternateLoading = false;
+    render();
+  }
 }
 
 async function saveBarcodes(variantId, barcodes) {
@@ -157,6 +201,13 @@ async function deleteBarcodeFromVariant(variant, barcode) {
 function syncVariant(updated) {
   state.variants = state.variants.map(v => v.id === updated.id ? {...updated} : v);
   state.bulkVariants = state.bulkVariants.map(v => v.id === updated.id ? {...updated} : v);
+  if (updated.alternateBarcodes.length > 0) {
+    const exists = state.alternateVariants.some(v => v.id === updated.id);
+    state.alternateVariants = exists ? state.alternateVariants.map(v => v.id === updated.id ? {...updated} : v) : [...state.alternateVariants, {...updated}];
+    state.alternateVariants.sort((a, b) => variantDisplayTitle(a).localeCompare(variantDisplayTitle(b)));
+  } else {
+    state.alternateVariants = state.alternateVariants.filter(v => v.id !== updated.id);
+  }
   if (state.selected?.id === updated.id) state.selected = {...updated};
 }
 
@@ -170,12 +221,12 @@ function hero() {
 }
 
 function sidebar() {
-  return `<aside class="side-column"><div class="card"><h3>Staff instructions</h3><ol class="instruction-list"><li>Search for the product or variant.</li><li>Click <strong>Manage barcodes</strong>.</li><li>Add one or more barcodes separated by commas.</li><li>Use <strong>Reload barcode data</strong> in the POS scanner after changes.</li></ol></div><div class="card"><h3>Barcode rules</h3><p class="small">Barcodes are stored as text, so leading zeroes are preserved.</p><p class="small">Do not add the native Shopify barcode as an alternate barcode.</p><p class="small">Avoid assigning the same UPC to two different products. The POS scanner ignores ambiguous duplicates.</p></div><div class="card"><h3>Data location</h3><p class="small">Namespace: <span class="code-chip">custom</span></p><p class="small">Key: <span class="code-chip">alternate_barcodes</span></p><p class="small">Owner: <span class="code-chip">ProductVariant</span></p></div></aside>`;
+  return `<aside class="side-column"><div class="card"><h3>Staff instructions</h3><ol class="instruction-list"><li>Search for the product or variant.</li><li>Click <strong>Manage barcodes</strong>.</li><li>Add one or more barcodes separated by commas.</li><li>Use <strong>Reload barcode data</strong> in the POS scanner after changes.</li></ol></div><div class="card"><h3>Barcode inventory</h3><p class="small">Open a complete view of variants that currently have alternate barcodes saved.</p><button class="primary" id="viewAlternatesSide">View items with alternates</button></div><div class="card"><h3>Barcode rules</h3><p class="small">Barcodes are stored as text, so leading zeroes are preserved.</p><p class="small">Do not add the native Shopify barcode as an alternate barcode.</p><p class="small">Avoid assigning the same UPC to two different products. The POS scanner ignores ambiguous duplicates.</p></div><div class="card"><h3>Data location</h3><p class="small">Namespace: <span class="code-chip">custom</span></p><p class="small">Key: <span class="code-chip">alternate_barcodes</span></p><p class="small">Owner: <span class="code-chip">ProductVariant</span></p></div></aside>`;
 }
 
 function renderSearch() {
   const totalAlternates = state.variants.reduce((sum, v) => sum + v.alternateBarcodes.length, 0);
-  return `<div class="app-shell">${hero()}${state.setupWarning ? `<div class="banner warning"><strong>Setup warning:</strong> ${esc(state.setupWarning)}</div>` : ''}<div class="layout-grid"><main class="main-column"><div class="card"><div class="row-between"><div><h2>Find a product variant</h2><p class="small">Search by product name, SKU, native barcode, or barcode text.</p></div>${state.hasSearched ? `<span class="badge gold">${state.variants.length} result${state.variants.length !== 1 ? 's' : ''}</span>` : ''}</div><label>Search products and variants</label><input id="search" type="search" placeholder="Search by product name, variant title, SKU, or barcode…" value="${esc(state.searchInput)}"></div>${state.hasSearched ? `<div class="stat-grid"><div class="stat"><strong>${state.variants.length}</strong><span>Results loaded</span></div><div class="stat"><strong>${totalAlternates}</strong><span>Alternate barcodes shown</span></div><div class="stat"><strong>${state.variants.filter(v => v.alternateBarcodes.length).length}</strong><span>Variants with alternates</span></div></div>` : ''}${state.searchError ? `<div class="banner critical">${esc(state.searchError)}</div>` : ''}${renderResults()}</main>${sidebar()}</div><div class="footer-note">24K Multi-Barcode Manager · Powered by Shopify variant metafields</div></div>`;
+  return `<div class="app-shell">${hero()}${state.setupWarning ? `<div class="banner warning"><strong>Setup warning:</strong> ${esc(state.setupWarning)}</div>` : ''}<div class="layout-grid"><main class="main-column"><div class="card"><div class="row-between"><div><h2>Find a product variant</h2><p class="small">Search by product name, SKU, native barcode, or barcode text.</p></div><div class="row"><button id="viewAlternates">View items with alternates</button>${state.hasSearched ? `<span class="badge gold">${state.variants.length} result${state.variants.length !== 1 ? 's' : ''}</span>` : ''}</div></div><label>Search products and variants</label><input id="search" type="search" placeholder="Search by product name, variant title, SKU, or barcode…" value="${esc(state.searchInput)}"></div>${state.hasSearched ? `<div class="stat-grid"><div class="stat"><strong>${state.variants.length}</strong><span>Results loaded</span></div><div class="stat"><strong>${totalAlternates}</strong><span>Alternate barcodes shown</span></div><div class="stat"><strong>${state.variants.filter(v => v.alternateBarcodes.length).length}</strong><span>Variants with alternates</span></div></div>` : ''}${state.searchError ? `<div class="banner critical">${esc(state.searchError)}</div>` : ''}${renderResults()}</main>${sidebar()}</div><div class="footer-note">24K Multi-Barcode Manager · Powered by Shopify variant metafields</div></div>`;
 }
 
 function renderResults() {
@@ -183,9 +234,14 @@ function renderResults() {
   return `<div class="card"><div class="row-between"><h2>${state.searching ? 'Searching…' : `Results for "${esc(state.searchTerm)}"`}</h2><div class="row">${state.variants.length ? `<button id="bulkToggle">${state.bulkMode ? 'Cancel bulk edit' : 'Bulk edit'}</button>` : ''}${state.bulkMode && state.selectedIds.size ? `<button class="primary" id="editSelected">Edit ${state.selectedIds.size} selected</button>` : ''}</div></div><div class="table-wrap"><table><thead><tr>${state.bulkMode ? '<th><input type="checkbox" id="selectAll"></th>' : ''}<th>Product / Variant</th><th>Native barcode</th><th>SKU</th><th>Alternate barcodes</th>${!state.bulkMode ? '<th>Manage</th>' : ''}</tr></thead><tbody>${state.variants.length ? state.variants.map(v => `<tr>${state.bulkMode ? `<td><input type="checkbox" class="sel" data-id="${esc(v.id)}" ${state.selectedIds.has(v.id) ? 'checked' : ''}></td>` : ''}<td>${productCell(v)}</td><td>${esc(v.barcode || 'None')}</td><td>${esc(v.sku || '—')}</td><td><span class="badge ${v.alternateBarcodes.length ? 'success' : ''}">${v.alternateBarcodes.length}</span></td>${!state.bulkMode ? `<td><button data-manage="${esc(v.id)}">Manage barcodes</button></td>` : ''}</tr>`).join('') : `<tr><td colspan="6" class="muted">No variants found.</td></tr>`}</tbody></table></div><div class="row" style="margin-top:12px"><button id="prevPage" ${!state.cursorStack.length ? 'disabled' : ''}>Previous</button><button id="nextPage" ${!state.pageInfo?.hasNextPage ? 'disabled' : ''}>Next</button></div></div>`;
 }
 
+function renderAlternateBarcodeView() {
+  const total = state.alternateVariants.reduce((sum, v) => sum + v.alternateBarcodes.length, 0);
+  return `<div class="app-shell">${hero()}${state.setupWarning ? `<div class="banner warning"><strong>Setup warning:</strong> ${esc(state.setupWarning)}</div>` : ''}<div class="layout-grid"><main class="main-column"><div class="card row-between"><div><h2>Items with alternate barcodes</h2><p class="small">This view scans Shopify variants and lists every item with one or more saved alternate barcodes.</p></div><div class="row"><button id="backToSearch">Back to search</button><button class="primary" id="refreshAlternates">Refresh list</button></div></div>${state.alternateError ? `<div class="banner critical">${esc(state.alternateError)}</div>` : ''}<div class="stat-grid"><div class="stat"><strong>${state.alternateLoading ? '…' : state.alternateVariants.length}</strong><span>Variants with alternates</span></div><div class="stat"><strong>${state.alternateLoading ? '…' : total}</strong><span>Total alternate barcodes</span></div><div class="stat"><strong>${state.alternateScanned}</strong><span>Variants scanned</span></div></div><div class="card"><div class="row-between"><h2>${state.alternateLoading ? 'Loading alternate barcode inventory…' : 'Alternate barcode inventory'}</h2>${state.alternateLoaded ? `<span class="badge gold">${state.alternateVariants.length} item${state.alternateVariants.length !== 1 ? 's' : ''}</span>` : ''}</div><div class="table-wrap"><table><thead><tr><th>Product / Variant</th><th>Native barcode</th><th>SKU</th><th>Alternate barcodes</th><th>Manage</th></tr></thead><tbody>${state.alternateLoading ? `<tr><td colspan="5" class="muted">Scanning Shopify variants. This may take a moment on large catalogs…</td></tr>` : state.alternateVariants.length ? state.alternateVariants.map(v => `<tr><td>${productCell(v)}</td><td>${esc(v.barcode || 'None')}</td><td>${esc(v.sku || '—')}</td><td>${v.alternateBarcodes.map(b => `<span class="badge" style="margin:2px">${esc(b)}</span>`).join('')}</td><td><button data-alt-manage="${esc(v.id)}">Manage</button></td></tr>`).join('') : `<tr><td colspan="5" class="muted">No variants currently have alternate barcodes saved.</td></tr>`}</tbody></table></div></div></main>${sidebar()}</div><div class="footer-note">24K Multi-Barcode Manager · Alternate barcode inventory view</div></div>`;
+}
+
 function renderDetail() {
   const v = state.selected; const img = v.product.featuredMedia?.preview?.image?.url;
-  return `<div class="app-shell">${hero()}<div class="layout-grid"><main class="main-column"><div class="card"><button id="back">Back to search results</button></div><div class="card row"><div>${img ? `<img class="thumb" style="width:72px;height:72px" src="${esc(img)}" alt="">` : ''}</div><div><h1>${esc(variantDisplayTitle(v))}</h1><p>SKU: ${esc(v.sku || '—')}</p><span class="badge gold">${v.alternateBarcodes.length} alternate barcode${v.alternateBarcodes.length !== 1 ? 's' : ''}</span></div></div>${state.saveError ? `<div class="banner critical">${esc(state.saveError)}</div>` : ''}${state.saveSuccess ? `<div class="banner success">${esc(state.saveSuccess)}</div>` : ''}${state.saveWarning ? `<div class="banner warning">${esc(state.saveWarning)}</div>` : ''}<div class="card"><h2>All barcodes for this variant</h2><div class="barcode-list"><div class="barcode-item"><div><strong>${esc(v.barcode || 'No native barcode set')}</strong> <span class="badge info">Native</span><div class="muted small">Edit native barcode in Shopify product settings.</div></div></div>${v.alternateBarcodes.map(b => `<div class="barcode-item"><div><strong>${esc(b)}</strong> <span class="badge">Alternate</span></div><button class="danger" data-delete="${esc(b)}">Delete</button></div>`).join('') || '<p class="muted">No alternate barcodes added yet.</p>'}</div></div><div class="card"><h2>Add alternate barcode</h2><p class="small">Enter one barcode, or several separated by commas. Leading zeroes are preserved.</p><div class="grid2"><div><label>New barcode(s)</label><input id="newBarcode" type="text" placeholder="Example: 070847015208, 070847015215" value="${esc(state.newBarcode)}"><div class="field-help">Duplicates and native barcode matches will be skipped automatically.</div></div><button class="primary" id="addBarcode">Add barcode</button></div></div></main>${sidebar()}</div></div>`;
+  return `<div class="app-shell">${hero()}<div class="layout-grid"><main class="main-column"><div class="card"><button id="back">${state.alternateView ? 'Back to alternate barcode view' : 'Back to search results'}</button></div><div class="card row"><div>${img ? `<img class="thumb" style="width:72px;height:72px" src="${esc(img)}" alt="">` : ''}</div><div><h1>${esc(variantDisplayTitle(v))}</h1><p>SKU: ${esc(v.sku || '—')}</p><span class="badge gold">${v.alternateBarcodes.length} alternate barcode${v.alternateBarcodes.length !== 1 ? 's' : ''}</span></div></div>${state.saveError ? `<div class="banner critical">${esc(state.saveError)}</div>` : ''}${state.saveSuccess ? `<div class="banner success">${esc(state.saveSuccess)}</div>` : ''}${state.saveWarning ? `<div class="banner warning">${esc(state.saveWarning)}</div>` : ''}<div class="card"><h2>All barcodes for this variant</h2><div class="barcode-list"><div class="barcode-item"><div><strong>${esc(v.barcode || 'No native barcode set')}</strong> <span class="badge info">Native</span><div class="muted small">Edit native barcode in Shopify product settings.</div></div></div>${v.alternateBarcodes.map(b => `<div class="barcode-item"><div><strong>${esc(b)}</strong> <span class="badge">Alternate</span></div><button class="danger" data-delete="${esc(b)}">Delete</button></div>`).join('') || '<p class="muted">No alternate barcodes added yet.</p>'}</div></div><div class="card"><h2>Add alternate barcode</h2><p class="small">Enter one barcode, or several separated by commas. Leading zeroes are preserved.</p><div class="grid2"><div><label>New barcode(s)</label><input id="newBarcode" type="text" placeholder="Example: 070847015208, 070847015215" value="${esc(state.newBarcode)}"><div class="field-help">Duplicates and native barcode matches will be skipped automatically.</div></div><button class="primary" id="addBarcode">Add barcode</button></div></div></main>${sidebar()}</div></div>`;
 }
 
 function renderBulkEdit() {
@@ -196,6 +252,7 @@ function render() {
   if (!state.setupDone) app.innerHTML = `<div class="app-shell">${hero()}<div class="card row"><strong>Initializing barcode manager…</strong></div></div>`;
   else if (state.inBulkEdit) app.innerHTML = renderBulkEdit();
   else if (state.selected) app.innerHTML = renderDetail();
+  else if (state.alternateView) app.innerHTML = renderAlternateBarcodeView();
   else app.innerHTML = renderSearch();
   bind();
 }
@@ -203,7 +260,12 @@ function render() {
 function bind() {
   const search = document.getElementById('search');
   if (search) search.addEventListener('input', e => { state.searchInput = e.target.value; clearTimeout(state.debounce); state.debounce = setTimeout(() => { state.searchTerm = state.searchInput.trim(); state.cursorStack = []; if (!state.searchTerm) { state.variants = []; state.hasSearched = false; render(); } else performSearch(state.searchTerm); }, 400); });
-  document.querySelectorAll('[data-manage]').forEach(btn => btn.addEventListener('click', () => { state.selected = {...state.variants.find(v => v.id === btn.dataset.manage)}; state.saveError=''; state.saveSuccess=''; state.saveWarning=''; state.newBarcode=''; render(); }));
+  document.getElementById('viewAlternates')?.addEventListener('click', () => loadAlternateBarcodeView());
+  document.getElementById('viewAlternatesSide')?.addEventListener('click', () => loadAlternateBarcodeView());
+  document.getElementById('refreshAlternates')?.addEventListener('click', () => loadAlternateBarcodeView(true));
+  document.getElementById('backToSearch')?.addEventListener('click', () => { state.alternateView = false; render(); });
+  document.querySelectorAll('[data-alt-manage]').forEach(btn => btn.addEventListener('click', () => { state.selected = {...state.alternateVariants.find(v => v.id === btn.dataset.altManage)}; state.saveError=''; state.saveSuccess=''; state.saveWarning=''; state.newBarcode=''; render(); }));
+  document.querySelectorAll('[data-manage]').forEach(btn => btn.addEventListener('click', () => { state.alternateView = false; state.selected = {...state.variants.find(v => v.id === btn.dataset.manage)}; state.saveError=''; state.saveSuccess=''; state.saveWarning=''; state.newBarcode=''; render(); }));
   document.getElementById('back')?.addEventListener('click', () => { state.selected = null; render(); });
   document.getElementById('addBarcode')?.addEventListener('click', async () => { state.newBarcode = document.getElementById('newBarcode').value; state.saveError=''; state.saveSuccess=''; state.saveWarning=''; try { await addBarcodesToVariant(state.selected, state.newBarcode); state.newBarcode=''; } catch (err) { state.saveError = err.message; } render(); });
   document.querySelectorAll('[data-delete]').forEach(btn => btn.addEventListener('click', () => deleteBarcodeFromVariant(state.selected, btn.dataset.delete)));
