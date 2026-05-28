@@ -1,6 +1,6 @@
 name = "24K Multi-Barcode Manager"
 client_id = "abfad0ce032d37b161456105d86720f5"
-application_url = "https://multibarcodeapp24kliquor.lovable.app"
+application_url = "https://twentyfourkarats.github.io/multibarcodeliquor/"
 embedded = true
 handle = "24k-pos-barcode-scanner"
 
@@ -18,4 +18,4 @@ direct_api_mode = "online"
 embedded_app_direct_api_access = true
 
 [auth]
-redirect_urls = ["https://multibarcodeapp24kliquor.lovable.app/auth/callback"]
+redirect_urls = ["https://twentyfourkarats.github.io/multibarcodeliquor/auth/callback"]
